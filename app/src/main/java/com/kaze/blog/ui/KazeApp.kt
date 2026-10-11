@@ -55,6 +55,7 @@ fun KazeApp(vm: NotesViewModel = viewModel()) {
     var gridMode by rememberSaveable { mutableStateOf(true) }
 
     val notes by vm.notes.collectAsStateWithLifecycle()
+    val folders by vm.folders.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -102,6 +103,7 @@ fun KazeApp(vm: NotesViewModel = viewModel()) {
                     if (id == null) {
                         HomeScreen(
                             notes = notes,
+                            folders = folders,
                             vm = vm,
                             snack = snack,
                             filter = filter,
@@ -118,6 +120,8 @@ fun KazeApp(vm: NotesViewModel = viewModel()) {
                         EditorScreen(
                             noteId = id,
                             existing = notes.firstOrNull { it.id == id },
+                            folders = folders,
+                            onAddFolder = { vm.addFolder(it) },
                             onCommit = { vm.commit(it) },
                             onTrash = { n ->
                                 val blank = n.title.isBlank() && n.body.isBlank()

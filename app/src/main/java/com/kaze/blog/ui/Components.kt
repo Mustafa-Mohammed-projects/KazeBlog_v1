@@ -4,6 +4,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -37,6 +40,21 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import com.kaze.blog.data.Media
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -104,8 +122,9 @@ fun formatFullDate(ts: Long): String =
 
 fun wordCount(text: String): Int = text.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun KazeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+fun KazeChip(label: String, selected: Boolean, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val p = LocalPalette.current
     val bg by animateColorAsState(
         if (selected) p.accent else p.onBg.copy(alpha = 0.08f), tween(200), label = "chipBg",
@@ -117,10 +136,10 @@ fun KazeChip(label: String, selected: Boolean, onClick: () -> Unit) {
         Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
     ) {
-        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -157,4 +176,78 @@ fun SearchField(query: String, onChange: (String) -> Unit) {
             }
         }
     }
+}
+
+private fun vec(name: String, path: String): ImageVector {
+    fun build(d: String) = ImageVector.Builder(
+        name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f,
+    ).addPath(pathData = PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.Black)).build()
+    return try { build(path) } catch (e: Throwable) { build("M4,4h16v16H4z") }
+}
+
+val ImageIcon: ImageVector by lazy {
+    vec("Image", "M21,19V5c0,-1.1 -0.9,-2 -2,-2H5c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2zM8.5,13.5l2.5,3.01L14.5,12l4.5,6H5l3.5,-4.5z")
+}
+val BrushIcon: ImageVector by lazy {
+    vec("Brush", "M7,14c-1.66,0 -3,1.34 -3,3 0,1.31 -1.16,2 -2,2 0.92,1.22 2.49,2 4,2 2.21,0 4,-1.79 4,-4 0,-1.66 -1.34,-3 -3,-3zM20.71,4.63l-1.34,-1.34c-0.39,-0.39 -1.02,-0.39 -1.41,0L9,12.25 11.75,15l8.96,-8.96c0.39,-0.39 0.39,-1.02 0,-1.41z")
+}
+val UndoIcon: ImageVector by lazy {
+    vec("Undo", "M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z")
+}
+val RedoIcon: ImageVector by lazy {
+    vec("Redo", "M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z")
+}
+
+/** Loads a saved image/drawing off the main thread and shows it. */
+@Composable
+fun AttachmentImage(name: String, targetWidth: Int, modifier: Modifier, contentScale: ContentScale) {
+    val ctx = LocalContext.current
+    val bmp by produceState<ImageBitmap?>(null, name) {
+        value = withContext(Dispatchers.IO) { Media.load(ctx, name, targetWidth)?.asImageBitmap() }
+    }
+    val b = bmp
+    if (b != null) {
+        Image(bitmap = b, contentDescription = null, modifier = modifier, contentScale = contentScale)
+    } else {
+        Box(modifier.height(120.dp).background(Color.Gray.copy(alpha = 0.2f)))
+    }
+}
+
+@Composable
+fun FolderDialog(
+    title: String,
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDelete: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    val p = LocalPalette.current
+    var name by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = p.surface,
+        titleContentColor = p.onBg,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { if (it.length <= 24) name = it },
+                singleLine = true,
+                placeholder = { Text("Folder name") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim()) }) {
+                Text("Save", color = p.accent)
+            }
+        },
+        dismissButton = {
+            Row {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) { Text("Delete", color = Color(0xFFE5675C)) }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel", color = p.onBg) }
+            }
+        },
+    )
 }

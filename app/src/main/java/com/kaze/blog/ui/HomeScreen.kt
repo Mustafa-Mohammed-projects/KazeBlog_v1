@@ -72,7 +72,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kaze.blog.data.CATEGORIES
+import com.kaze.blog.data.Folder
+import androidx.compose.ui.layout.ContentScale
 import com.kaze.blog.data.Note
 import com.kaze.blog.data.NotesViewModel
 
@@ -82,6 +83,7 @@ private fun Set<Long>.toggle(id: Long): Set<Long> = if (id in this) this - id el
 @Composable
 fun HomeScreen(
     notes: List<Note>,
+    folders: List<Folder>,
     vm: NotesViewModel,
     snack: SnackbarHostState,
     filter: String,
@@ -99,10 +101,15 @@ fun HomeScreen(
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmEmpty by remember { mutableStateOf(false) }
+    var newFolder by remember { mutableStateOf(false) }
+    var editFolder by remember { mutableStateOf<Folder?>(null) }
     val inTrash = filter == "Trash"
 
     BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
     LaunchedEffect(filter) { selected = emptySet() }
+    LaunchedEffect(folders, filter) {
+        if (filter.startsWith("f:") && folders.none { "f:${it.id}" == filter }) onFilter("All")
+    }
 
     val visible = remember(notes, filter, query) {
         notes
@@ -111,7 +118,7 @@ fun HomeScreen(
                 else !n.trashed && when (filter) {
                     "All" -> true
                     "Favorites" -> n.favorite
-                    else -> n.category == filter
+                    else -> filter == "f:${n.folderId}"
                 }
             }
             .filter { n ->
@@ -123,7 +130,6 @@ fun HomeScreen(
     }
     val activeCount = remember(notes) { notes.count { !it.trashed } }
     val trashCount = remember(notes) { notes.count { it.trashed } }
-    val filters = remember { listOf("All", "Favorites") + CATEGORIES + "Trash" }
 
     Scaffold(
         containerColor = p.bg,
@@ -240,9 +246,18 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(filters) { f ->
-                        KazeChip(label = f, selected = f == filter, onClick = { onFilter(f) })
+                    item { KazeChip("All", filter == "All") { onFilter("All") } }
+                    item { KazeChip("Favorites", filter == "Favorites") { onFilter("Favorites") } }
+                    items(folders, key = { it.id }) { f ->
+                        KazeChip(
+                            label = f.name,
+                            selected = filter == "f:${f.id}",
+                            onLongClick = { editFolder = f },
+                            onClick = { onFilter("f:${f.id}") },
+                        )
                     }
+                    item { KazeChip("+ Folder", false) { newFolder = true } }
+                    item { KazeChip("Trash", inTrash) { onFilter("Trash") } }
                 }
             }
 
@@ -269,6 +284,7 @@ fun HomeScreen(
                 NoteCard(
                     note = note,
                     selected = note.id in selected,
+                    folderName = folders.firstOrNull { it.id == note.folderId }?.name,
                     maxBodyLines = if (gridMode) 7 else 3,
                     onClick = {
                         if (selected.isNotEmpty() || inTrash) selected = selected.toggle(note.id)
@@ -283,6 +299,22 @@ fun HomeScreen(
         }
     }
 
+    if (newFolder) {
+        FolderDialog(
+            title = "New folder", initial = "",
+            onConfirm = { vm.addFolder(it); newFolder = false },
+            onDelete = null,
+            onDismiss = { newFolder = false },
+        )
+    }
+    editFolder?.let { f ->
+        FolderDialog(
+            title = "Edit folder", initial = f.name,
+            onConfirm = { vm.renameFolder(f.id, it); editFolder = null },
+            onDelete = { vm.deleteFolder(f.id); editFolder = null },
+            onDismiss = { editFolder = null },
+        )
+    }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -326,6 +358,7 @@ fun HomeScreen(
 private fun NoteCard(
     note: Note,
     selected: Boolean,
+    folderName: String?,
     maxBodyLines: Int,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -350,6 +383,14 @@ private fun NoteCard(
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column(Modifier.padding(16.dp)) {
+            if (note.attachments.isNotEmpty()) {
+                AttachmentImage(
+                    note.attachments.first(), 600,
+                    Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(12.dp)),
+                    ContentScale.Crop,
+                )
+                Spacer(Modifier.height(10.dp))
+            }
             if (note.title.isNotBlank()) {
                 Row(verticalAlignment = Alignment.Top) {
                     Text(
@@ -382,8 +423,15 @@ private fun NoteCard(
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(note.category, fontSize = 11.sp, color = p.accent, fontWeight = FontWeight.Medium)
-                Text("  ·  ${formatCardDate(note.updatedAt)}", fontSize = 11.sp, color = p.muted)
+                if (folderName != null) {
+                    Text(
+                        folderName, fontSize = 11.sp, color = p.accent, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text("  ·  ", fontSize = 11.sp, color = p.muted)
+                }
+                Text(formatCardDate(note.updatedAt), fontSize = 11.sp, color = p.muted)
                 Spacer(Modifier.weight(1f))
                 if (note.favorite) {
                     Icon(Icons.Default.Favorite, contentDescription = "Favorite", tint = p.accent, modifier = Modifier.size(14.dp))

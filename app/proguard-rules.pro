@@ -1,1 +1,2 @@
-# default rules are enough
+-keepclassmembers class * extends androidx.lifecycle.ViewModel { <init>(...); }
+-keep class com.kaze.blog.data.** { *; }
